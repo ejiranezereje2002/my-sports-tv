@@ -3,13 +3,8 @@
   "version": "1.0.0",
   "name": "BinTV Sports",
   "description": "Live and upcoming sports events from BinTV",
-  "resources": [
-    "catalog",
-    "stream"
-  ],
-  "types": [
-    "sports"
-  ],
+  "resources": ["catalog", "stream"],
+  "types": ["sports"],
   "catalogs": [
     {
       "type": "sports",
@@ -18,13 +13,7 @@
       "extra": [
         {
           "name": "genre",
-          "options": [
-            "Basketball",
-            "Baseball",
-            "American Football",
-            "Motorsport",
-            "Others"
-          ],
+          "options": ["Basketball", "Baseball", "American Football", "Motorsport", "Others"],
           "isRequired": false
         }
       ]
@@ -36,20 +25,14 @@
       "extra": [
         {
           "name": "genre",
-          "options": [
-            "Cricket",
-            "Basketball",
-            "Baseball",
-            "American Football",
-            "Motorsport",
-            "Others"
-          ],
+          "options": ["Cricket", "Basketball", "Baseball", "American Football", "Motorsport", "Others"],
           "isRequired": false
         }
       ]
     }
   ],
-  "idPrefixes": [
-    "bintv:"
-  ]
+  "idPrefixes": ["bintv:"],
+  "behaviorHints": {
+    "configurable": false
+  }
 }
