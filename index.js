@@ -9,7 +9,7 @@ const API_URL = 'https://bintvjson.lovable.app/api/public/bintvjson';
 const CACHE_TTL = 3 * 60 * 1000;
 const REQUEST_TIMEOUT = 12000;
 
-// The exact headers grandemx.org requires
+// The exact headers grandemx.org / bintv-sources requires
 const UPSTREAM_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36',
     'Origin': 'https://grandemx.org',
@@ -173,7 +173,7 @@ async function handleStream(req, res, type, id) {
     }
 }
 
-// ---- PROXY (injects grandemx.org headers) ----
+// ---- PROXY (injects grandemx.org headers, preserves ?id=) ----
 function handleProxy(req, res) {
     const urlObj = new URL(req.url, 'http://x');
     const target = urlObj.searchParams.get('url');
@@ -195,15 +195,20 @@ function handleProxy(req, res) {
         return res.end('Host not allowed');
     }
 
-    console.log(`[BinTV] proxy -> ${target}`);
+    // CRITICAL: build path with query string preserved
+    const upstreamPath = parsed.pathname + (parsed.search || '');
+    console.log(`[BinTV] proxy -> ${parsed.hostname}${upstreamPath}`);
 
     const lib = parsed.protocol === 'https:' ? https : http;
 
-    const proxyReq = lib.get(target, {
-        headers: UPSTREAM_HEADERS,
-        timeout: 15000
+    const proxyReq = lib.get({
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: upstreamPath,
+        method: 'GET',
+        headers: UPSTREAM_HEADERS
     }, (upstream) => {
-        // Follow redirects by re-routing through this same /proxy
+        // Follow redirects through this same /proxy
         if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
             const loc = upstream.headers.location.startsWith('http')
                 ? upstream.headers.location
@@ -216,7 +221,8 @@ function handleProxy(req, res) {
         }
 
         res.statusCode = upstream.statusCode;
-        const fwd = ['content-type', 'content-length', 'content-disposition', 'accept-ranges', 'content-range', 'cache-control'];
+        const fwd = ['content-type', 'content-length', 'content-disposition',
+                     'accept-ranges', 'content-range', 'cache-control', 'set-cookie'];
         fwd.forEach(h => { if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]); });
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Headers', '*');
