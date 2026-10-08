@@ -1,18 +1,19 @@
 'use strict';
 
-const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const https = require('https');
+const manifest = require('./manifest.json');
 
 // ---- CONFIG ----
 const API_URL = 'https://bintvjson.lovable.app/api/public/bintvjson';
-const CACHE_TTL = 3 * 60 * 1000; // 3 minutes
-const REQUEST_TIMEOUT = 12000;    // 12 seconds
+const CACHE_TTL = 3 * 60 * 1000;
+const REQUEST_TIMEOUT = 12000;
 
-// ---- SIMPLE MEMORY CACHE ----
+// ---- MEMORY CACHE ----
 let cache = { data: null, timestamp: 0 };
 
-// ---- CUSTOM FETCH (works on every Node version, no deps) ----
-function httpGet(url) {
+// ---- NATIVE HTTPS FETCH (no deps) ----
+function httpGet(url, depth = 0) {
+    if (depth > 5) return Promise.reject(new Error('Too many redirects'));
     return new Promise((resolve, reject) => {
         const req = https.get(url, {
             headers: {
@@ -23,51 +24,41 @@ function httpGet(url) {
             },
             timeout: REQUEST_TIMEOUT
         }, (res) => {
-            // Handle redirects
             if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-                return httpGet(res.headers.location).then(resolve).catch(reject);
+                return httpGet(res.headers.location, depth + 1).then(resolve).catch(reject);
             }
             if (res.statusCode !== 200) {
                 return reject(new Error(`HTTP ${res.statusCode}`));
             }
             let body = '';
             res.setEncoding('utf8');
-            res.on('data', chunk => body += chunk);
+            res.on('data', c => body += c);
             res.on('end', () => {
-                try {
-                    resolve(JSON.parse(body));
-                } catch (e) {
-                    reject(new Error('Invalid JSON: ' + e.message));
-                }
+                try { resolve(JSON.parse(body)); }
+                catch (e) { reject(new Error('Invalid JSON')); }
             });
         });
-        req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+        req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
         req.on('error', reject);
     });
 }
 
-// ---- FETCH WITH CACHE + FALLBACK ----
 async function getData() {
     const now = Date.now();
     if (cache.data && (now - cache.timestamp) < CACHE_TTL) {
-        console.log('[BinTV] Cache hit');
+        console.log('[BinTV] cache hit');
         return cache.data;
     }
-
-    console.log('[BinTV] Fetching fresh from API...');
+    console.log('[BinTV] fetching fresh');
     try {
         const data = await httpGet(API_URL);
-        if (!data || typeof data !== 'object') throw new Error('Empty API response');
+        if (!data || typeof data !== 'object') throw new Error('Empty response');
         cache = { data, timestamp: now };
-        console.log(`[BinTV] OK: live=${data.counts?.live} upcoming=${data.counts?.upcoming} channels=${data.counts?.channels}`);
+        console.log(`[BinTV] OK live=${data.counts?.live} upcoming=${data.counts?.upcoming} channels=${data.counts?.channels}`);
         return data;
     } catch (err) {
-        console.error('[BinTV] API fetch failed:', err.message);
-        if (cache.data) {
-            console.warn('[BinTV] Using stale cache');
-            return cache.data;
-        }
-        // Return safe empty structure so server NEVER crashes
+        console.error('[BinTV] fetch failed:', err.message);
+        if (cache.data) return cache.data;
         return {
             success: false,
             counts: { live: 0, upcoming: 0, channels: 0 },
@@ -78,36 +69,33 @@ async function getData() {
     }
 }
 
-// ---- HELPERS ----
-function cleanUrl(url) {
-    if (!url || typeof url !== 'string') return '';
-    return url.replace(/&amp;/g, '&').trim();
+function cleanUrl(u) {
+    if (!u || typeof u !== 'string') return '';
+    return u.replace(/&amp;/g, '&').trim();
 }
 
-// ---- ADDON BUILDER ----
-const builder = new addonBuilder(require('./manifest.json'));
+// ---- HANDLERS ----
+async function handleManifest(req, res) {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.end(JSON.stringify(manifest));
+}
 
-// ---- CATALOG HANDLER ----
-builder.defineCatalogHandler(async (args) => {
-    const { id, extra } = args;
-    const genre = extra && extra.genre ? extra.genre : null;
-    console.log(`[BinTV] Catalog: id=${id} genre=${genre}`);
+async function handleCatalog(req, res, type, id) {
+    // Parse genre from query string (?genre=Basketball)
+    const urlObj = new URL(req.url, 'http://x');
+    const genre = urlObj.searchParams.get('genre');
+
+    console.log(`[BinTV] catalog type=${type} id=${id} genre=${genre}`);
 
     try {
         const data = await getData();
         let items = [];
+        if (id === 'live') items = data['Live Events'] || [];
+        else if (id === 'upcoming') items = data['Upcoming Events'] || [];
+        else if (id === 'channels') items = data['24/7 Channels'] || [];
 
-        if (id === 'live') {
-            items = data['Live Events'] || [];
-        } else if (id === 'upcoming') {
-            items = data['Upcoming Events'] || [];
-        } else if (id === 'channels') {
-            items = data['24/7 Channels'] || [];
-        }
-
-        if (genre && genre !== 'All') {
-            items = items.filter(i => i.category === genre);
-        }
+        if (genre && genre !== 'All') items = items.filter(i => i.category === genre);
 
         const metas = items.map(item => ({
             id: `bintv:${item.id}`,
@@ -119,53 +107,86 @@ builder.defineCatalogHandler(async (args) => {
             genres: item.category ? [item.category] : []
         }));
 
-        console.log(`[BinTV] Returning ${metas.length} metas`);
-        return { metas };
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.end(JSON.stringify({ metas }));
     } catch (err) {
-        console.error('[BinTV] Catalog handler error:', err);
-        return { metas: [] };
+        console.error('[BinTV] catalog error:', err.message);
+        res.statusCode = 200;
+        res.end(JSON.stringify({ metas: [] }));
     }
-});
+}
 
-// ---- STREAM HANDLER ----
-builder.defineStreamHandler(async (args) => {
-    const { id } = args;
-    console.log(`[BinTV] Stream request: ${id}`);
-
-    if (!id || !id.startsWith('bintv:')) {
-        return { streams: [] };
-    }
-
-    const eventId = id.substring('bintv:'.length);
-
+async function handleStream(req, res, type, id) {
+    console.log(`[BinTV] stream type=${type} id=${id}`);
     try {
+        if (!id.startsWith('bintv:')) {
+            return res.end(JSON.stringify({ streams: [] }));
+        }
+        const eventId = id.substring('bintv:'.length);
         const data = await getData();
         const all = [
             ...(data['Live Events'] || []),
             ...(data['Upcoming Events'] || []),
             ...(data['24/7 Channels'] || [])
         ];
-
         const event = all.find(e => e.id === eventId);
         if (!event) {
-            console.warn(`[BinTV] Event not found: ${eventId}`);
-            return { streams: [] };
+            return res.end(JSON.stringify({ streams: [] }));
         }
-
         const streams = (event.streams || []).map(s => ({
             title: `${s.name || 'Stream'}\n${event.name || ''}`,
             name: s.name || 'Stream',
             url: cleanUrl(s.url),
             behaviorHints: { notWebReady: false }
         }));
-
-        console.log(`[BinTV] Returning ${streams.length} streams`);
-        return { streams };
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.end(JSON.stringify({ streams }));
     } catch (err) {
-        console.error('[BinTV] Stream handler error:', err);
-        return { streams: [] };
+        console.error('[BinTV] stream error:', err.message);
+        res.end(JSON.stringify({ streams: [] }));
     }
-});
+}
 
-// ---- EXPORT ----
-module.exports = builder.getInterface();
+// ---- ROUTER ----
+async function router(req, res) {
+    const urlObj = new URL(req.url, 'http://x');
+    const path = urlObj.pathname.replace(/\.json$/, '');
+    const parts = path.split('/').filter(Boolean);
+
+    console.log(`[BinTV] ${req.method} ${req.url}`);
+
+    // CORS preflight
+    if (req.method === 'OPTIONS') {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.statusCode = 204;
+        return res.end();
+    }
+
+    try {
+        if (parts.length === 0 || parts[0] === 'manifest') {
+            return await handleManifest(req, res);
+        }
+        if (parts[0] === 'catalog' && parts.length >= 3) {
+            // /catalog/:type/:id.json
+            return await handleCatalog(req, res, parts[1], parts[2]);
+        }
+        if (parts[0] === 'stream' && parts.length >= 3) {
+            // /stream/:type/:id.json
+            return await handleStream(req, res, parts[1], parts[2]);
+        }
+        // Fallback — root returns manifest so users visiting / work
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify(manifest));
+    } catch (err) {
+        console.error('[BinTV] router fatal:', err);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ err: 'Internal error', message: err.message }));
+    }
+}
+
+// ---- VERCEL DEFAULT EXPORT ----
+module.exports = router;
+module.exports.default = router;
