@@ -1,25 +1,72 @@
 const { addonBuilder } = require('stremio-addon-sdk');
-const fetch = require('node-fetch');
 
-// The API endpoint
 const API_URL = 'https://bintvjson.lovable.app/api/public/bintvjson';
 
-// Create a new addon builder
-const builder = new addonBuilder(require('./manifest.json'));
+// Simple in-memory cache (5 minutes)
+let cache = { data: null, timestamp: 0 };
+const CACHE_TTL = 5 * 60 * 1000;
 
-// Helper to fetch and parse data from the API
+// Fetch with headers + caching
 async function fetchData() {
-    const response = await fetch(API_URL);
-    if (!response.ok) {
-        throw new Error(`Failed to fetch API: ${response.statusText}`);
+    const now = Date.now();
+    if (cache.data && (now - cache.timestamp) < CACHE_TTL) {
+        console.log('[BinTV] Returning cached data');
+        return cache.data;
     }
-    return await response.json();
+
+    console.log('[BinTV] Fetching fresh data from API...');
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    try {
+        const response = await fetch(API_URL, {
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Stremio-Addon/1.0)',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Cache-Control': 'no-cache'
+            },
+            signal: controller.signal
+        });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        cache = { data, timestamp: now };
+        console.log(`[BinTV] Fetched OK. Live: ${data.counts?.live}, Upcoming: ${data.counts?.upcoming}, Channels: ${data.counts?.channels}`);
+        return data;
+    } catch (err) {
+        clearTimeout(timeout);
+        console.error('[BinTV] Fetch error:', err.message);
+        // Return stale cache if available
+        if (cache.data) {
+            console.warn('[BinTV] Returning stale cache due to error');
+            return cache.data;
+        }
+        throw err;
+    }
 }
 
-// Catalog handler
+// Clean up HTML entities like &amp; in URLs
+function cleanUrl(url) {
+    if (!url) return url;
+    return url.replace(/&amp;/g, '&');
+}
+
+const builder = new addonBuilder(require('./manifest.json'));
+
+// ---- CATALOG HANDLER ----
 builder.defineCatalogHandler(async (args) => {
-    const { type, id, extra } = args;
-    const genre = extra && extra.genre ? extra.genre : null;
+    const { id, extra } = args;
+    const genre = extra?.genre || null;
+
+    console.log(`[BinTV] Catalog request: id=${id}, genre=${genre}`);
 
     try {
         const data = await fetchData();
@@ -31,66 +78,68 @@ builder.defineCatalogHandler(async (args) => {
             items = data['Upcoming Events'] || [];
         }
 
-        // Filter by genre if provided
         if (genre) {
             items = items.filter(item => item.category === genre);
         }
 
-        // Map to Stremio meta format
         const metas = items.map(item => ({
             id: `bintv:${item.id}`,
             type: 'sports',
             name: item.name,
-            poster: item.poster,
-            description: `${item.category} - Status: ${item.status}`,
-            // Store the original item in a custom field for the stream handler
-            // This is not part of the standard Stremio meta spec but is a common pattern
-            _raw: item 
+            poster: cleanUrl(item.poster),
+            posterShape: 'landscape',
+            description: `${item.category || 'Sports'} • Status: ${item.status || 'N/A'}`,
+            genres: item.category ? [item.category] : []
         }));
 
+        console.log(`[BinTV] Returning ${metas.length} items`);
         return { metas };
     } catch (error) {
-        console.error(error);
+        console.error('[BinTV] Catalog error:', error.message);
         return { metas: [] };
     }
 });
 
-// Stream handler
+// ---- STREAM HANDLER ----
 builder.defineStreamHandler(async (args) => {
-    const { type, id } = args;
+    const { id } = args;
 
-    // id is in the format 'bintv:EVENT_ID'
     if (!id.startsWith('bintv:')) {
         return { streams: [] };
     }
 
     const eventId = id.substring('bintv:'.length);
+    console.log(`[BinTV] Stream request for event: ${eventId}`);
 
     try {
         const data = await fetchData();
-        let allEvents = [
+        const allEvents = [
             ...(data['Live Events'] || []),
-            ...(data['Upcoming Events'] || [])
+            ...(data['Upcoming Events'] || []),
+            ...(data['24/7 Channels'] || [])
         ];
-        
-        const event = allEvents.find(e => e.id === eventId);
 
+        const event = allEvents.find(e => e.id === eventId);
         if (!event) {
+            console.warn(`[BinTV] Event not found: ${eventId}`);
             return { streams: [] };
         }
 
-        const streams = event.streams.map(stream => ({
-            title: stream.name,
-            url: stream.url,
-            // Add behaviorHints if needed
+        const streams = (event.streams || []).map(stream => ({
+            title: `${stream.name}\n${event.name}`,
+            name: stream.name,
+            url: cleanUrl(stream.url),
+            behaviorHints: {
+                notWebReady: false
+            }
         }));
 
+        console.log(`[BinTV] Returning ${streams.length} streams`);
         return { streams };
     } catch (error) {
-        console.error(error);
+        console.error('[BinTV] Stream error:', error.message);
         return { streams: [] };
     }
 });
 
-// Export the addon interface
 module.exports = builder.getInterface();
