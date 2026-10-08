@@ -99,7 +99,7 @@ async function handleCatalog(req, res, type, id) {
 
         const metas = items.map(item => ({
             id: `bintv:${item.id}`,
-            type: 'channel',
+            type: 'tv',
             name: item.name || 'Unknown Event',
             poster: cleanUrl(item.poster),
             posterShape: 'landscape',
