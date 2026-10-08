@@ -4,12 +4,10 @@ const https = require('https');
 const http = require('http');
 const manifest = require('./manifest.json');
 
-// ---- CONFIG ----
 const API_URL = 'https://bintvjson.lovable.app/api/public/bintvjson';
 const CACHE_TTL = 3 * 60 * 1000;
 const REQUEST_TIMEOUT = 12000;
 
-// The exact headers grandemx.org / bintv-sources requires
 const UPSTREAM_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36',
     'Origin': 'https://grandemx.org',
@@ -19,10 +17,8 @@ const UPSTREAM_HEADERS = {
     'Accept-Encoding': 'identity'
 };
 
-// ---- MEMORY CACHE ----
 let cache = { data: null, timestamp: 0 };
 
-// ---- NATIVE HTTPS FETCH ----
 function httpGet(url, depth = 0) {
     if (depth > 5) return Promise.reject(new Error('Too many redirects'));
     return new Promise((resolve, reject) => {
@@ -30,7 +26,6 @@ function httpGet(url, depth = 0) {
             headers: {
                 'User-Agent': UPSTREAM_HEADERS['User-Agent'],
                 'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'en-US,en;q=0.9',
                 'Referer': 'https://bintvjson.lovable.app/'
             },
             timeout: REQUEST_TIMEOUT
@@ -54,33 +49,32 @@ function httpGet(url, depth = 0) {
 
 async function getData() {
     const now = Date.now();
-    if (cache.data && (now - cache.timestamp) < CACHE_TTL) {
-        console.log('[BinTV] cache hit');
-        return cache.data;
-    }
+    if (cache.data && (now - cache.timestamp) < CACHE_TTL) return cache.data;
     console.log('[BinTV] fetching fresh');
     try {
         const data = await httpGet(API_URL);
-        if (!data || typeof data !== 'object') throw new Error('Empty response');
         cache = { data, timestamp: now };
         console.log(`[BinTV] OK live=${data.counts?.live} upcoming=${data.counts?.upcoming} channels=${data.counts?.channels}`);
         return data;
     } catch (err) {
         console.error('[BinTV] fetch failed:', err.message);
         if (cache.data) return cache.data;
-        return {
-            success: false,
-            counts: { live: 0, upcoming: 0, channels: 0 },
-            'Live Events': [],
-            'Upcoming Events': [],
-            '24/7 Channels': []
-        };
+        return { 'Live Events': [], 'Upcoming Events': [], '24/7 Channels': [] };
     }
 }
 
 function cleanUrl(u) {
     if (!u || typeof u !== 'string') return '';
     return u.replace(/&amp;/g, '&').trim();
+}
+
+function findEvent(data, eventId) {
+    const all = [
+        ...(data['Live Events'] || []),
+        ...(data['Upcoming Events'] || []),
+        ...(data['24/7 Channels'] || [])
+    ];
+    return all.find(e => e.id === eventId);
 }
 
 // ---- MANIFEST ----
@@ -107,7 +101,7 @@ async function handleCatalog(req, res, type, id) {
 
         const metas = items.map(item => ({
             id: `bintv:${item.id}`,
-            type: 'channel',
+            type: 'movie',
             name: item.name || 'Unknown Event',
             poster: cleanUrl(item.poster),
             posterShape: 'landscape',
@@ -120,8 +114,39 @@ async function handleCatalog(req, res, type, id) {
         res.end(JSON.stringify({ metas }));
     } catch (err) {
         console.error('[BinTV] catalog error:', err.message);
-        res.statusCode = 200;
         res.end(JSON.stringify({ metas: [] }));
+    }
+}
+
+// ---- META (required for movie type) ----
+async function handleMeta(req, res, type, id) {
+    console.log(`[BinTV] meta type=${type} id=${id}`);
+    try {
+        if (!id.startsWith('bintv:')) return res.end(JSON.stringify({ meta: null }));
+        const eventId = id.substring('bintv:'.length);
+        const data = await getData();
+        const event = findEvent(data, eventId);
+        if (!event) return res.end(JSON.stringify({ meta: null }));
+
+        const meta = {
+            id: id,
+            type: 'movie',
+            name: event.name || 'Unknown Event',
+            poster: cleanUrl(event.poster),
+            posterShape: 'landscape',
+            background: cleanUrl(event.poster),
+            description: `${event.category || 'Sports'}\n\nStatus: ${event.status || 'N/A'}`,
+            genres: event.category ? [event.category] : [],
+            releaseInfo: event.status || '',
+            videos: [] // required field, even if empty
+        };
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.end(JSON.stringify({ meta }));
+    } catch (err) {
+        console.error('[BinTV] meta error:', err.message);
+        res.end(JSON.stringify({ meta: null }));
     }
 }
 
@@ -132,15 +157,9 @@ async function handleStream(req, res, type, id) {
         if (!id.startsWith('bintv:')) return res.end(JSON.stringify({ streams: [] }));
         const eventId = id.substring('bintv:'.length);
         const data = await getData();
-        const all = [
-            ...(data['Live Events'] || []),
-            ...(data['Upcoming Events'] || []),
-            ...(data['24/7 Channels'] || [])
-        ];
-        const event = all.find(e => e.id === eventId);
+        const event = findEvent(data, eventId);
         if (!event) return res.end(JSON.stringify({ streams: [] }));
 
-        // Build proxy URL using this deployment's own host
         const host = req.headers['x-forwarded-host'] || req.headers.host;
         const proto = req.headers['x-forwarded-proto'] || 'https';
 
@@ -173,34 +192,24 @@ async function handleStream(req, res, type, id) {
     }
 }
 
-// ---- PROXY (injects grandemx.org headers, preserves ?id=) ----
+// ---- PROXY ----
 function handleProxy(req, res) {
     const urlObj = new URL(req.url, 'http://x');
     const target = urlObj.searchParams.get('url');
-
-    if (!target) {
-        res.statusCode = 400;
-        return res.end('Missing url param');
-    }
+    if (!target) { res.statusCode = 400; return res.end('Missing url param'); }
 
     let parsed;
-    try { parsed = new URL(target); } catch {
-        res.statusCode = 400;
-        return res.end('Invalid url');
-    }
+    try { parsed = new URL(target); } catch { res.statusCode = 400; return res.end('Invalid url'); }
 
     const allowedHosts = ['bintv-sources.pages.dev', 'grandemx.org', 'exmxbxe.cfd'];
     if (!allowedHosts.some(h => parsed.hostname === h || parsed.hostname.endsWith('.' + h))) {
-        res.statusCode = 403;
-        return res.end('Host not allowed');
+        res.statusCode = 403; return res.end('Host not allowed');
     }
 
-    // CRITICAL: build path with query string preserved
     const upstreamPath = parsed.pathname + (parsed.search || '');
     console.log(`[BinTV] proxy -> ${parsed.hostname}${upstreamPath}`);
 
     const lib = parsed.protocol === 'https:' ? https : http;
-
     const proxyReq = lib.get({
         hostname: parsed.hostname,
         port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
@@ -208,7 +217,6 @@ function handleProxy(req, res) {
         method: 'GET',
         headers: UPSTREAM_HEADERS
     }, (upstream) => {
-        // Follow redirects through this same /proxy
         if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
             const loc = upstream.headers.location.startsWith('http')
                 ? upstream.headers.location
@@ -219,10 +227,9 @@ function handleProxy(req, res) {
             res.setHeader('Location', `${proto}://${host}/proxy?url=${encodeURIComponent(loc)}`);
             return res.end();
         }
-
         res.statusCode = upstream.statusCode;
         const fwd = ['content-type', 'content-length', 'content-disposition',
-                     'accept-ranges', 'content-range', 'cache-control', 'set-cookie'];
+                     'accept-ranges', 'content-range', 'cache-control'];
         fwd.forEach(h => { if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]); });
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Headers', '*');
@@ -258,6 +265,7 @@ async function router(req, res) {
     try {
         if (parts.length === 0 || parts[0] === 'manifest') return await handleManifest(req, res);
         if (parts[0] === 'catalog' && parts.length >= 3) return await handleCatalog(req, res, parts[1], parts[2]);
+        if (parts[0] === 'meta' && parts.length >= 3) return await handleMeta(req, res, parts[1], parts[2]);
         if (parts[0] === 'stream' && parts.length >= 3) return await handleStream(req, res, parts[1], parts[2]);
         if (parts[0] === 'proxy') return handleProxy(req, res);
 
