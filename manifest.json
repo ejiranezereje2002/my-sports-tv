@@ -1,14 +1,14 @@
 {
-  "id": "org.bintv.sports.v2",
-  "version": "2.0.0",
+  "id": "org.bintv.sports.v3",
+  "version": "3.0.0",
   "name": "BinTV Sports",
   "description": "Live and upcoming sports events from BinTV",
   "logo": "https://cdn.jsdelivr.net/gh/willthequeencome/img-cdn/images/nba-401914129.png",
   "resources": ["catalog", "stream"],
-  "types": ["sports"],
+  "types": ["channel"],
   "catalogs": [
     {
-      "type": "sports",
+      "type": "channel",
       "id": "live",
       "name": "Live Events",
       "extra": [
@@ -20,7 +20,7 @@
       ]
     },
     {
-      "type": "sports",
+      "type": "channel",
       "id": "upcoming",
       "name": "Upcoming Events",
       "extra": [
@@ -32,7 +32,7 @@
       ]
     },
     {
-      "type": "sports",
+      "type": "channel",
       "id": "channels",
       "name": "24/7 Channels",
       "extra": []
