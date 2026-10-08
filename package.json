@@ -1,10 +1,10 @@
 {
   "name": "bintv-sports-addon",
-  "version": "1.0.0",
-  "description": "Stremio addon for BinTV sports",
+  "version": "2.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "dependencies": {
     "stremio-addon-sdk": "^1.6.10"
