@@ -1,4 +1,4 @@
-const API_URL = 'https://www.futbol-x.xyz/api/football.json';
+const API_URL = 'https://bintvjson.lovable.app/api/public/bintvjson';
 
 const MANIFEST = {
     id: 'community.soccer-live-streams',
