@@ -1,8 +1,8 @@
 {
-  "name": "bintv-sports-addon",
-  "version": "3.0.0",
-  "main": "index.js",
-  "engines": {
-    "node": ">=18.0.0"
+  "name": "my-stremio-addon",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@stremio-addon/sdk": "^1.0.0"
   }
 }
