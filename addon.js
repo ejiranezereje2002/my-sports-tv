@@ -1,8 +1,10 @@
-import { createAddon } from 'stremio-addon-sdk';
+import addonSdk from 'stremio-addon-sdk';
+const { createAddon } = addonSdk;
 
-const API_URL = 'https://www.futbol-x.xyz/api/football.json';
+const API_URL = 'https://futbol-x.xyz';
 
-// Helper function to fetch the API data safely in a serverless environment
+// ... keep all the rest of your soccer stream code exactly the same below this line ...
+
 async function fetchFootballData() {
     try {
         const response = await fetch(API_URL);
