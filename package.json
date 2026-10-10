@@ -1,8 +1,8 @@
 {
-  "name": "my-stremio-addon",
+  "name": "my-sports-tv",
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "@stremio-addon/sdk": "^1.0.0"
+    "@stremio/stremio-addon-sdk": "^1.2.0"
   }
 }
