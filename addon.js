@@ -1,4 +1,4 @@
-import { createAddon } from '@stremio-addon/sdk';
+import { createAddon } from 'stremio-addon-sdk';
 
 const API_URL = 'https://www.futbol-x.xyz/api/football.json';
 
