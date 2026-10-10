@@ -1,4 +1,4 @@
-const API_URL = 'https://futbol-x.xyz';
+const API_URL = 'https://www.futbol-x.xyz/api/football.json';
 
 // Define the Stremio Manifest configuration
 const MANIFEST = {
