@@ -1,6 +1,5 @@
 const API_URL = 'https://www.futbol-x.xyz/api/football.json';
 
-// Define the Stremio Manifest configuration
 const MANIFEST = {
     id: 'community.soccer-live-streams',
     version: '1.0.0',
@@ -18,13 +17,12 @@ const MANIFEST = {
     ]
 };
 
-// Helper function to safely fetch the live football streams
 async function fetchFootballData() {
     try {
         const response = await fetch(API_URL);
         if (!response.ok) return [];
         const data = await response.json();
-        return data.success ? data.streams?.streams || [] : [];
+        return data.success ? data.streams?.[0]?.streams || [] : [];
     } catch (error) {
         console.error('Error fetching football streams:', error);
         return [];
@@ -32,7 +30,6 @@ async function fetchFootballData() {
 }
 
 export default async function handler(req, res) {
-    // Enable global CORS permissions required by Stremio
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -41,8 +38,9 @@ export default async function handler(req, res) {
         return res.status(204).end();
     }
 
-    // Clean up the URL routing path
-    const urlPath = req.url.split('?')[0].replace('.json', '');
+    // Safely parse out the pathname without throwing an error
+    const rawPath = req.url.split('?')[0]; 
+    const urlPath = rawPath.replace('.json', '');
 
     try {
         // 1. Manifest Endpoint
@@ -69,7 +67,7 @@ export default async function handler(req, res) {
         // 3. Stream Endpoint (/stream/movie/fx_matchid)
         if (urlPath.startsWith('/stream/')) {
             const parts = urlPath.split('/');
-            const id = parts[parts.length - 1]; // Pulls the match id (e.g., fx_a4v1l8)
+            const id = parts[parts.length - 1]; 
             const targetUriName = id.replace('fx_', '');
 
             const matches = await fetchFootballData();
