@@ -1,18 +1,23 @@
-const API_URL = 'https://www.futbol-x.xyz/api/football.json';
+const API_URL = 'https://futbol-x.xyz';
 
 const MANIFEST = {
     id: 'community.soccer-live-streams',
-    version: '1.5.0',
+    version: '1.6.0',
     name: 'Live Soccer Streams',
     description: 'Live football streams from Futbol-X.',
     resources: ['catalog', 'meta', 'stream'],
-    types: ['tv'], // Changed type to tv channels for instant one-click playing
+    types: ['tv'],
     idPrefixes: ['fx_'],
     catalogs: [
         {
             type: 'tv',
             id: 'fx_football_catalog',
-            name: 'Live Football Matches'
+            name: 'Live Football Matches',
+            extra: [
+                { name: 'search', required: false }
+            ],
+            // FIX: This changes the boxes from narrow movie posters into wide landscape rectangles!
+            posterShape: 'landscape' 
         }
     ]
 };
@@ -55,6 +60,7 @@ export default async function handler(req, res) {
                 id: `fx_${match.uri_name}`,
                 type: 'tv',
                 name: match.name,
+                // Maps the horizontal layout asset directly onto the wide canvas container
                 poster: match.poster || 'https://placehold.co',
                 description: `League: ${match.tag} | Starts: ${new Date(match.starts_at).toLocaleString()}`,
                 background: match.poster
@@ -79,6 +85,7 @@ export default async function handler(req, res) {
                         type: 'tv',
                         name: matchedGame.name,
                         poster: matchedGame.poster,
+                        posterShape: 'landscape',
                         description: `League: ${matchedGame.tag} | Live Event Streams`
                     }
                 });
