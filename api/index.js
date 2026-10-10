@@ -1,4 +1,4 @@
-const API_URL = 'https://futbol-x.xyz';
+const API_URL = 'https://my-sports-tv.vercel.app/manifest.json';
 
 const MANIFEST = {
     id: 'community.soccer-live-streams',
