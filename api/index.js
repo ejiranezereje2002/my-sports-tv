@@ -2,40 +2,27 @@ const API_URL = 'https://www.futbol-x.xyz/api/football.json';
 
 const MANIFEST = {
     id: 'community.soccer-live-streams',
-    version: '1.7.0', // Incremented version to force Stremio to clear its layout layout cache
+    version: '1.5.0',
     name: 'Live Soccer Streams',
     description: 'Live football streams from Futbol-X.',
     resources: ['catalog', 'meta', 'stream'],
-    types: ['tv'],
+    types: ['tv'], // Changed type to tv channels for instant one-click playing
     idPrefixes: ['fx_'],
     catalogs: [
         {
             type: 'tv',
             id: 'fx_football_catalog',
-            name: 'Live Football Matches',
-            extra: [
-                { name: 'search', required: false }
-            ],
-            posterShape: 'landscape' 
+            name: 'Live Football Matches'
         }
     ]
 };
-
-// HELPER FUNCTION: Fits ultra-wide banners into Stremio's strict 16:9 ratio boxes by letterboxing it with empty space
-function formatLandscapePoster(posterUrl) {
-    if (!posterUrl || posterUrl.trim() === '') {
-        return 'https://placehold.co';
-    }
-    // Encodes your API image and wraps it in a layout-optimizer CDN that pads the borders instead of cropping them
-    return `https://weserv.nl{encodeURIComponent(posterUrl)}&w=400&h=225&fit=contain&a=center&bg=transparent`;
-}
 
 async function fetchFootballData() {
     try {
         const response = await fetch(API_URL);
         if (!response.ok) return [];
         const data = await response.json();
-        return data.success ? data.streams?.streams || [] : [];
+        return data.success ? data.streams?.[0]?.streams || [] : [];
     } catch (error) {
         console.error('Error fetching football streams:', error);
         return [];
@@ -60,7 +47,7 @@ export default async function handler(req, res) {
             return res.status(200).json(MANIFEST);
         }
 
-        // 2. Catalog Endpoint
+        // 2. Catalog Endpoint (/catalog/tv/fx_football_catalog)
         if (urlPath.startsWith('/catalog/')) {
             const matches = await fetchFootballData();
             
@@ -68,8 +55,7 @@ export default async function handler(req, res) {
                 id: `fx_${match.uri_name}`,
                 type: 'tv',
                 name: match.name,
-                // Applied the auto-fit helper function here to preserve full team logos
-                poster: formatLandscapePoster(match.poster),
+                poster: match.poster || 'https://placehold.co',
                 description: `League: ${match.tag} | Starts: ${new Date(match.starts_at).toLocaleString()}`,
                 background: match.poster
             }));
@@ -77,7 +63,7 @@ export default async function handler(req, res) {
             return res.status(200).json({ metas });
         }
 
-        // 3. Meta Endpoint
+        // 3. Meta Endpoint (/meta/tv/fx_matchid)
         if (urlPath.startsWith('/meta/')) {
             const parts = urlPath.split('/');
             const id = parts[parts.length - 1];
@@ -92,8 +78,7 @@ export default async function handler(req, res) {
                         id: id,
                         type: 'tv',
                         name: matchedGame.name,
-                        poster: formatLandscapePoster(matchedGame.poster),
-                        posterShape: 'landscape',
+                        poster: matchedGame.poster,
                         description: `League: ${matchedGame.tag} | Live Event Streams`
                     }
                 });
@@ -101,7 +86,7 @@ export default async function handler(req, res) {
             return res.status(404).json({ error: 'Meta not found' });
         }
 
-        // 4. Stream Endpoint
+        // 4. Stream Endpoint (/stream/tv/fx_matchid)
         if (urlPath.startsWith('/stream/')) {
             const parts = urlPath.split('/');
             const id = parts[parts.length - 1]; 
