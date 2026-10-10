@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "@stremio/stremio-addon-sdk": "^1.2.0"
+    "stremio-addon-sdk": "^1.2.0"
   }
 }
