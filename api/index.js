@@ -1,4 +1,4 @@
-const API_URL = 'https://futbol-x.xyz';
+const API_URL = 'https://www.futbol-x.xyz/api/football.json';
 
 const MANIFEST = {
     id: 'community.soccer-live-streams',
