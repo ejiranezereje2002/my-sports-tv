@@ -1,16 +1,16 @@
-const API_URL = 'https://www.futbol-x.xyz/api/football.json';
+const API_URL = 'https://futbol-x.xyz';
 
 const MANIFEST = {
     id: 'community.soccer-live-streams',
-    version: '1.0.0',
+    version: '1.1.0',
     name: 'Live Soccer Streams',
     description: 'Live football streams from Futbol-X.',
     resources: ['catalog', 'stream'],
-    types: ['movie'],
+    types: ['series'], // Changed from movie to series to fix the Stremio layout structure
     idPrefixes: ['fx_'],
     catalogs: [
         {
-            type: 'movie',
+            type: 'series',
             id: 'fx_football_catalog',
             name: 'Live Football Matches'
         }
@@ -22,7 +22,8 @@ async function fetchFootballData() {
         const response = await fetch(API_URL);
         if (!response.ok) return [];
         const data = await response.json();
-        return data.success ? data.streams?.[0]?.streams || [] : [];
+        // Fixed the double question mark syntax error (?.)
+        return data.success ? data.streams[0]?.streams || [] : [];
     } catch (error) {
         console.error('Error fetching football streams:', error);
         return [];
@@ -38,9 +39,9 @@ export default async function handler(req, res) {
         return res.status(204).end();
     }
 
-    // Safely parse out the pathname without throwing an error
-    const rawPath = req.url.split('?')[0]; 
-    const urlPath = rawPath.replace('.json', '');
+    // Clean query parameters and file extensions
+    const cleanUrl = req.url.split('?')[0];
+    const urlPath = cleanUrl.replace('.json', '');
 
     try {
         // 1. Manifest Endpoint
@@ -48,13 +49,13 @@ export default async function handler(req, res) {
             return res.status(200).json(MANIFEST);
         }
 
-        // 2. Catalog Endpoint (/catalog/movie/fx_football_catalog)
+        // 2. Catalog Endpoint (/catalog/series/fx_football_catalog)
         if (urlPath.startsWith('/catalog/')) {
             const matches = await fetchFootballData();
             
             const metas = matches.map(match => ({
                 id: `fx_${match.uri_name}`,
-                type: 'movie',
+                type: 'series',
                 name: match.name,
                 poster: match.poster || 'https://placehold.co',
                 description: `League: ${match.tag} | Starts: ${new Date(match.starts_at).toLocaleString()}`,
@@ -64,7 +65,7 @@ export default async function handler(req, res) {
             return res.status(200).json({ metas });
         }
 
-        // 3. Stream Endpoint (/stream/movie/fx_matchid)
+        // 3. Stream Endpoint (/stream/series/fx_matchid)
         if (urlPath.startsWith('/stream/')) {
             const parts = urlPath.split('/');
             const id = parts[parts.length - 1]; 
